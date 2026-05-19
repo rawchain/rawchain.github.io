@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>rawchain</title>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --green:      #00ff41;
+      --green-dim:  #00cc33;
+      --green-dark: #003b00;
+      --bg:         #0d0d0d;
+      --terminal:   #111111;
+      --titlebar:   #1e1e1e;
+      --border:     #2a2a2a;
+      --text-dim:   #4a9e4a;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      font-family: 'Fira Code', monospace;
+      overflow: hidden;
+      cursor: none;
+    }
+
+    /* custom cursor */
+    .cursor-dot {
+      width: 6px; height: 6px;
+      background: var(--green);
+      border-radius: 50%;
+      position: fixed;
+      pointer-events: none;
+      z-index: 9999;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 8px var(--green);
+      transition: transform 0.1s;
+    }
+
+    /* matrix rain canvas */
+    #matrix {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 0;
+      opacity: 0.18;
+    }
+
+    /* center wrapper */
+    .scene {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      padding: 20px;
+    }
+
+    /* mac terminal window */
+    .terminal-window {
+      width: 100%;
+      max-width: 760px;
+      max-height: 90vh;
+      background: var(--terminal);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      box-shadow:
+        0 0 0 1px #000,
+        0 30px 80px rgba(0,0,0,0.8),
+        0 0 60px rgba(0,255,65,0.04);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      animation: windowIn 0.6s cubic-bezier(0.16,1,0.3,1) both;
+    }
+
+    @keyframes windowIn {
+      from { opacity: 0; transform: scale(0.94) translateY(20px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    /* titlebar */
+    .titlebar {
+      background: var(--titlebar);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      user-select: none;
+    }
+
+    .dot {
+      width: 13px; height: 13px;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: filter 0.2s;
+    }
+    .dot:hover { filter: brightness(1.3); }
+    .dot.red    { background: #ff5f57; box-shadow: 0 0 0 1px rgba(0,0,0,0.3); }
+    .dot.yellow { background: #febc2e; box-shadow: 0 0 0 1px rgba(0,0,0,0.3); }
+    .dot.green  { background: #28c840; box-shadow: 0 0 0 1px rgba(0,0,0,0.3); }
+
+    .titlebar-title {
+      flex: 1;
+      text-align: center;
+      font-size: 12px;
+      color: #555;
+      letter-spacing: 0.04em;
+    }
+
+    /* terminal body */
+    .terminal-body {
+      padding: 20px 24px 24px;
+      overflow-y: auto;
+      flex: 1;
+      scrollbar-width: thin;
+      scrollbar-color: var(--green-dark) transparent;
+    }
+
+    .terminal-body::-webkit-scrollbar { width: 4px; }
+    .terminal-body::-webkit-scrollbar-track { background: transparent; }
+    .terminal-body::-webkit-scrollbar-thumb { background: var(--green-dark); border-radius: 2px; }
+
+    /* lines */
+    .line {
+      font-size: 13.5px;
+      line-height: 1.75;
+      white-space: pre-wrap;
+      word-break: break-word;
+      opacity: 0;
+      animation: fadeIn 0.01s forwards;
+    }
+
+    @keyframes fadeIn { to { opacity: 1; } }
+
+    .prompt  { color: var(--green); }
+    .command { color: #e0e0e0; }
+    .output  { color: var(--green-dim); }
+    .dim     { color: var(--text-dim); }
+    .white   { color: #ffffff; }
+    .blank   { display: block; height: 10px; }
+
+    /* blinking block cursor */
+    .blink {
+      display: inline-block;
+      width: 9px; height: 15px;
+      background: var(--green);
+      vertical-align: text-bottom;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* link styling */
+    a {
+      color: var(--green);
+      text-decoration: none;
+      border-bottom: 1px solid var(--green-dark);
+      transition: border-color 0.2s, text-shadow 0.2s;
+    }
+    a:hover {
+      border-color: var(--green);
+      text-shadow: 0 0 8px var(--green);
+    }
+
+    /* scanline overlay */
+    .scanlines {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 2px,
+        rgba(0,0,0,0.08) 2px,
+        rgba(0,0,0,0.08) 4px
+      );
+    }
+
+    /* glow pulse on window */
+    .terminal-window:hover {
+      box-shadow:
+        0 0 0 1px #000,
+        0 30px 80px rgba(0,0,0,0.8),
+        0 0 80px rgba(0,255,65,0.07);
+    }
+  </style>
+</head>
+<body>
+
+<div class="cursor-dot" id="cursorDot"></div>
+<canvas id="matrix"></canvas>
+<div class="scanlines"></div>
+
+<div class="scene">
+  <div class="terminal-window">
+    <div class="titlebar">
+      <div class="dot red"></div>
+      <div class="dot yellow"></div>
+      <div class="dot green"></div>
+      <div class="titlebar-title">rawchain — bash — 80×32</div>
+    </div>
+    <div class="terminal-body" id="termBody"></div>
+  </div>
+</div>
+
+<script>
+  // ── matrix rain ──────────────────────────────────────────
+  const canvas = document.getElementById('matrix');
+  const ctx    = canvas.getContext('2d');
+  const chars  = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン01'.split('');
+  let cols, drops;
+
+  function initMatrix() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+    cols  = Math.floor(canvas.width / 18);
+    drops = Array(cols).fill(1);
+  }
+
+  function drawMatrix() {
+    ctx.fillStyle = 'rgba(0,0,0,0.05)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#00ff41';
+    ctx.font = '15px Fira Code';
+    drops.forEach((y, i) => {
+      const ch = chars[Math.floor(Math.random() * chars.length)];
+      ctx.fillText(ch, i * 18, y * 18);
+      if (y * 18 > canvas.height && Math.random() > 0.975) drops[i] = 0;
+      drops[i]++;
+    });
+  }
+
+  initMatrix();
+  window.addEventListener('resize', initMatrix);
+  setInterval(drawMatrix, 50);
+
+  // ── custom cursor ─────────────────────────────────────────
+  const dot = document.getElementById('cursorDot');
+  document.addEventListener('mousemove', e => {
+    dot.style.left = e.clientX + 'px';
+    dot.style.top  = e.clientY + 'px';
+  });
+
+  // ── typewriter engine ─────────────────────────────────────
+  const body = document.getElementById('termBody');
+  let queue = [], running = false;
+
+  function el(tag, cls, html) {
+    const e = document.createElement(tag);
+    if (cls)  e.className = cls;
+    if (html) e.innerHTML = html;
+    return e;
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  async function typeLine(node, text, speed = 38) {
+    for (const ch of text) {
+      node.textContent += ch;
+      body.scrollTop = body.scrollHeight;
+      await sleep(speed + Math.random() * 20);
+    }
+  }
+
+  async function addPrompt(cmd, delay = 0) {
+    await sleep(delay);
+    const row = el('div', 'line');
+    const p   = el('span', 'prompt', '❯ ');
+    const c   = el('span', 'command');
+    row.appendChild(p);
+    row.appendChild(c);
+    body.appendChild(row);
+    await typeLine(c, cmd, 42);
+    await sleep(180);
+  }
+
+  async function addOutput(html, delay = 60) {
+    await sleep(delay);
+    const row = el('div', 'line output');
+    row.innerHTML = html;
+    body.appendChild(row);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function gap() { body.appendChild(el('div', 'blank')); }
+
+  async function run() {
+    await sleep(600);
+
+    await addPrompt('whoami');
+    await addOutput('rawchain');
+    gap();
+
+    await addPrompt('cat ./identity.txt', 400);
+    await addOutput('security researcher  &  builder');
+    await addOutput('I break things to understand them.');
+    await addOutput('then I build things that matter.');
+    gap();
+
+    await addPrompt('cat ./interests.txt', 400);
+    await addOutput('red teaming  ·  hardware hacking  ·  RF  ·  opsec  ·  DeFi');
+    gap();
+
+    await addPrompt('ls ./projects', 500);
+    await addOutput('<span class="white">projectzero</span>    <span class="dim">portable pi 3b pentesting platform</span>       <span class="dim">[active]</span>');
+    await addOutput('<span class="white">netauditor</span>     <span class="dim">local network vulnerability scanner</span>       <span class="dim">[building]</span>');
+    await addOutput('<span class="white">osinttoolkit</span>   <span class="dim">modular OSINT framework for recon</span>          <span class="dim">[planning]</span>');
+    gap();
+
+    await addPrompt('cat ./gear.txt', 500);
+    await addOutput('<span class="dim">[primary]</span>   Apple M3 MacBook');
+    await addOutput('<span class="dim">[field]</span>     Raspberry Pi 3B  —  Kali Linux 32-bit');
+    await addOutput('<span class="dim">[adapter]</span>   BrosTrend AC1200  —  monitor mode + packet injection');
+    await addOutput('<span class="dim">[vpn]</span>       Mullvad  —  no-log  ·  MAC randomised  ·  host obfuscated');
+    await addOutput('<span class="dim">[next]</span>      Project One  —  hardware hacking platform  <span class="dim">[ in design ]</span>');
+    gap();
+
+    await addPrompt('cat ./stack.txt', 400);
+    await addOutput('python  ·  bash  ·  javascript  ·  lua');
+    await addOutput('nmap  ·  wireshark  ·  burpsuite  ·  metasploit');
+    await addOutput('kali linux  ·  raspberry pi  ·  macos');
+    gap();
+
+    await addPrompt('cat ./links.txt', 500);
+    await addOutput('<a href="https://github.com/rawchain" target="_blank">github.com/rawchain</a>');
+    gap();
+
+    await sleep(400);
+    const last = el('div', 'line');
+    const p2   = el('span', 'prompt', '❯ ');
+    const cur  = el('span', 'blink');
+    last.appendChild(p2);
+    last.appendChild(cur);
+    body.appendChild(last);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  run();
+</script>
+</body>
+</html>
